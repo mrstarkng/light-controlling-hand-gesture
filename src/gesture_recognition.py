@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from tensorflow.keras.models import load_model
 import mediapipe as mp
-
+    
 # Load mô hình
 model = load_model("models/hand_gesture_model.h5")
 

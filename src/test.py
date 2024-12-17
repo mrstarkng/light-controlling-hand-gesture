@@ -1,3 +1,4 @@
-import mediapipe
+#!/Users/tonynguyen/miniconda3/envs/gesture_env/bin/python
 
-print(mediapipe.__version__)
+import cv2
+print("OpenCV version:", cv2.__version__)
