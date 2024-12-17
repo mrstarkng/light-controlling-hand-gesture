@@ -1,2 +1,3 @@
-import yaml
-print("PyYAML đã được cài đặt thành công!")
+import mediapipe
+
+print(mediapipe.__version__)
