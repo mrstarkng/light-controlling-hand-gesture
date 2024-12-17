@@ -5,5 +5,3 @@ pyserial
 numpy
 pandas
 pyyaml
-mediapipe>=0.8.9; platform_system != "Darwin" and platform.machine != 'arm64'
-mediapipe-silicon>=0.8.9; platform_system == "Darwin" and platform.machine == 'arm64'
