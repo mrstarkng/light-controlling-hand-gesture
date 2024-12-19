@@ -1,13 +1,23 @@
 import cv2
 import numpy as np
+import paho.mqtt.client as mqtt
 from tensorflow.keras.models import load_model
 import mediapipe as mp
-from light_control import LightController  # Import LightController for serial communication
 
-# Load hand gesture model
+# MQTT Configuration
+BROKER = "mqtt.eclipseprojects.io"
+PORT = 1883
+TOPIC_LED = "fish_tank/device/led/command"
+TOPIC_SERVO = "fish_tank/device/servo/command"
+
+# MQTT Client Initialization
+client = mqtt.Client()
+client.connect(BROKER, PORT, 60)
+
+# Load Hand Gesture Model
 model = load_model("models/hand_gesture_model.h5")
 
-# Class labels
+# Class labels  
 LABELS = {
     0: "turn_off",
     1: "light1",
@@ -16,61 +26,58 @@ LABELS = {
     4: "turn_on"
 }
 
-# Initialize MediaPipe Hand Detection
+# MediaPipe Initialization
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.5)
 mp_draw = mp.solutions.drawing_utils
 
-# Initialize LightController for serial communication
-light_controller = LightController(port="/dev/ttyUSB0", baudrate=9600)  # Replace with correct port
-
-# Open webcam
+# Start Video Capture
 cap = cv2.VideoCapture(0)
 print("Nhấn 'q' để thoát.")
 
-try:
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+def send_mqtt_command(gesture):
+    """Send MQTT command based on the recognized gesture."""
+    if gesture == "turn_off":
+        client.publish(TOPIC_LED, "OFF")
+    elif gesture == "turn_on":
+        client.publish(TOPIC_LED, "ON")
+    elif gesture == "light1":
+        client.publish(TOPIC_SERVO, "ON")
+    elif gesture == "light2":
+        client.publish(TOPIC_SERVO, "OFF")
+    print(f"Sent MQTT command: {gesture}")
 
-        # Convert BGR to RGB for MediaPipe processing
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(rgb_frame)
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
 
-        if results.multi_hand_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
-                # Extract hand landmarks as input for the model
-                landmarks = []
-                for lm in hand_landmarks.landmark:
-                    landmarks.extend([lm.x, lm.y, lm.z])
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = hands.process(rgb_frame)
 
-                # Predict gesture using the loaded model
-                prediction = model.predict(np.array([landmarks]))
-                class_id = np.argmax(prediction)
-                gesture = LABELS.get(class_id, "Unknown")
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            landmarks = []
+            for lm in hand_landmarks.landmark:
+                landmarks.extend([lm.x, lm.y, lm.z])
 
-                # Display the recognized gesture on the screen
-                cv2.putText(frame, gesture, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            # Predict Gesture
+            prediction = model.predict(np.array([landmarks]))
+            class_id = np.argmax(prediction)
+            gesture = LABELS.get(class_id, "Unknown")
 
-                # Send serial commands based on the detected gesture
-                if gesture == "turn_on":
-                    light_controller.send_command("LIGHT_ON")
-                elif gesture == "turn_off":
-                    light_controller.send_command("LIGHT_OFF")
-                elif gesture in ["light1", "light2", "light3"]:
-                    light_controller.send_command(gesture.upper())  # LIGHT1, LIGHT2, LIGHT3
+            # Display Gesture
+            cv2.putText(frame, gesture, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            send_mqtt_command(gesture)  # Send MQTT Command
 
-                # Draw hand landmarks
-                mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            # Draw Landmarks
+            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
-        # Display the frame
-        cv2.imshow("Gesture Recognition", frame)
+    cv2.imshow("Gesture Recognition", frame)
 
-        # Press 'q' to exit
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-finally:
-    cap.release()
-    light_controller.close()  # Close the serial connection
-    cv2.destroyAllWindows()
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+client.disconnect()
