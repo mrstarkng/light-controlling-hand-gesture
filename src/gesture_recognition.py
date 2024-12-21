@@ -1,51 +1,46 @@
 import cv2
 import numpy as np
-import paho.mqtt.client as mqtt
 from tensorflow.keras.models import load_model
 import mediapipe as mp
+import paho.mqtt.client as mqtt  # MQTT Library
+import time
 
-# MQTT Configuration
-BROKER = "mqtt.eclipseprojects.io"
-PORT = 1883
-TOPIC_LED = "fish_tank/device/led/command"
-TOPIC_SERVO = "fish_tank/device/servo/command"
+# MQTT Broker Configuration
+MQTT_BROKER = "mqtt.eclipseprojects.io"
+MQTT_PORT = 1883
+TOPICS = {
+    "LED": "fish_tank/device/led/command",
+    "SERVO": "fish_tank/device/servo/command",
+    "LEDBAR": "fish_tank/device/light/command",
+}
 
 # MQTT Client Initialization
-client = mqtt.Client()
-client.connect(BROKER, PORT, 60)
+mqtt_client = mqtt.Client()
+mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
 
-# Load Hand Gesture Model
+# Load the hand gesture model
 model = load_model("models/hand_gesture_model.h5")
 
-# Class labels  
+# Class labels
 LABELS = {
     0: "turn_off",
     1: "light1",
     2: "light2",
     3: "light3",
     4: "turn_on"
-}
+}   
 
-# MediaPipe Initialization
+# Initialize MediaPipe
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.5)
 mp_draw = mp.solutions.drawing_utils
 
-# Start Video Capture
+# Start capturing webcam feed
 cap = cv2.VideoCapture(0)
-print("Nhấn 'q' để thoát.")
+print("Press 'q' to exit.")
 
-def send_mqtt_command(gesture):
-    """Send MQTT command based on the recognized gesture."""
-    if gesture == "turn_off":
-        client.publish(TOPIC_LED, "OFF")
-    elif gesture == "turn_on":
-        client.publish(TOPIC_LED, "ON")
-    elif gesture == "light1":
-        client.publish(TOPIC_SERVO, "ON")
-    elif gesture == "light2":
-        client.publish(TOPIC_SERVO, "OFF")
-    print(f"Sent MQTT command: {gesture}")
+last_sent = 0  # thời điểm gửi lần cuối, khởi tạo 0
+SEND_INTERVAL = 2  # 5 giây mới gửi 1 lần
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -57,27 +52,48 @@ while cap.isOpened():
 
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
-            landmarks = []
+            landmarks = []  
             for lm in hand_landmarks.landmark:
                 landmarks.extend([lm.x, lm.y, lm.z])
 
-            # Predict Gesture
+            # Predict gesture
             prediction = model.predict(np.array([landmarks]))
             class_id = np.argmax(prediction)
             gesture = LABELS.get(class_id, "Unknown")
 
-            # Display Gesture
+            # Display gesture on frame
             cv2.putText(frame, gesture, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            send_mqtt_command(gesture)  # Send MQTT Command
 
-            # Draw Landmarks
+            # Chỉ gửi lệnh nếu đã quá 5 giây kể từ lần gửi trước
+            current_time = time.time()
+            if current_time - last_sent >= SEND_INTERVAL:
+                if gesture == "turn_on":
+                    mqtt_client.publish(TOPICS["LED"], "On")
+                    print("Turn ON LED command sent via MQTT.")
+                    last_sent = current_time
+                elif gesture == "turn_off":
+                    mqtt_client.publish(TOPICS["LED"], "Off")
+                    print("Turn OFF LED command sent via MQTT.")
+                    last_sent = current_time
+                elif gesture == "light1":
+                    mqtt_client.publish(TOPICS["LEDBAR"], "On")
+                    print("Turn ON LED Bar command sent via MQTT.")
+                    last_sent = current_time
+                elif gesture == "light2":
+                    mqtt_client.publish(TOPICS["LEDBAR"], "Off")
+                    print("Turn OFF LED Bar command sent via MQTT.")
+                    last_sent = current_time
+                elif gesture == "light3":
+                    mqtt_client.publish(TOPICS["SERVO"], "On")
+                    print("Toggle Servo command sent via MQTT.")
+                    last_sent = current_time
+
             mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
     cv2.imshow("Gesture Recognition", frame)
-
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 cap.release()
 cv2.destroyAllWindows()
-client.disconnect()
+mqtt_client.disconnect()
